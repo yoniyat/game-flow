@@ -11,6 +11,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 class Item(val pkg: String, val label: String, val icon: Bitmap, val album: Bitmap, val cover: Bitmap?)
 
@@ -20,6 +21,8 @@ class CoverFlowView(ctx: Context) : View(ctx) {
     var style = 0
         set(v) { field = v; invalidate() }
     var mode = 0
+        set(v) { field = v; invalidate() }
+    var fx = true
         set(v) { field = v; invalidate() }
     var bgA = 0xFF30303A.toInt()
         set(v) { field = v; invalidate() }
@@ -36,15 +39,86 @@ class CoverFlowView(ctx: Context) : View(ctx) {
     private var lastIdx = -1
     private var anim: ValueAnimator? = null
     private var handled = false
+    private val tau = 6.2831855f
     private val cam = Camera().apply { setLocation(0f, 0f, -20f) }
     private val m = Matrix()
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val mask = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
     private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textAlign = Paint.Align.CENTER; isFakeBoldText = true }
+    private val mark = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 46f; isFakeBoldText = true; alpha = 235 }
     private val bg = Paint()
     private val dim = Paint().apply { color = 0x99000000.toInt() }
     private val bp = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val fillP = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // ---- Flow effects: glows, waves, particles ----
+    private class Pt(var x: Float, var y: Float, val r: Float, val sp: Float, val ph: Float, val ci: Int)
+    private val pts = ArrayList<Pt>()
+    private val rnd = java.util.Random(7)
+    private val palette = intArrayOf(0xFF4DE8FF.toInt(), 0xFF2F7BFF.toInt(), 0xFFA35CFF.toInt())
+    private val glow: Bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).also {
+        val g = Paint().apply {
+            shader = RadialGradient(32f, 32f, 32f, intArrayOf(0xFFFFFFFF.toInt(), 0x66FFFFFF, 0x00FFFFFF), floatArrayOf(0f, .3f, 1f), Shader.TileMode.CLAMP)
+        }
+        Canvas(it).drawCircle(32f, 32f, 32f, g)
+    }
+    private val glowP = palette.map { col ->
+        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { colorFilter = PorterDuffColorFilter(col, PorterDuff.Mode.SRC_IN) }
+    }
+    private val wave = Path()
+    private val waveP = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val waveLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f }
+    private var waveShader: Shader? = null
+    private var tNow = 0f
+    private var lastNs = 0L
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        pts.clear()
+        val k = h / 540f
+        for (i in 0 until 55) {
+            pts.add(Pt(rnd.nextFloat() * w, rnd.nextFloat() * h, (1.5f + rnd.nextFloat() * 4.5f) * k, (10 + rnd.nextFloat() * 30) * k, rnd.nextFloat() * tau, rnd.nextInt(3)))
+        }
+        waveShader = LinearGradient(0f, 0f, w.toFloat(), 0f, intArrayOf(palette[0], palette[1], palette[2]), null, Shader.TileMode.CLAMP)
+    }
+
+    private fun drawFx(c: Canvas, w: Float, h: Float) {
+        val ns = System.nanoTime()
+        val dt = if (lastNs == 0L) 0f else min(.05f, (ns - lastNs) / 1e9f)
+        lastNs = ns; tNow += dt
+        for (j in 0..2) {
+            val bx = w * (.2f + .3f * j) + sin(tNow * .15f + j * 2f) * w * .08f
+            val by = h * (.3f + .25f * (j % 2)) + sin(tNow * .12f + j) * h * .06f
+            val rad = max(w, h) * .38f
+            glowP[j].alpha = 55
+            c.drawBitmap(glow, null, RectF(bx - rad, by - rad, bx + rad, by + rad), glowP[j])
+        }
+        for (k in 0..1) {
+            val base = h * (.78f + .08f * k)
+            val amp = h * (.05f + .02f * k)
+            wave.reset()
+            var x = 0f
+            var first = true
+            while (x <= w + 30f) {
+                val y = base + sin(x / w * 5.2f + tNow * (.5f + .2f * k) + k * 1.7f) * amp
+                if (first) { wave.moveTo(x, y); first = false } else wave.lineTo(x, y)
+                x += 30f
+            }
+            waveLine.shader = waveShader; waveLine.alpha = 90 - 30 * k
+            c.drawPath(wave, waveLine)
+            wave.lineTo(w + 30f, h); wave.lineTo(0f, h); wave.close()
+            waveP.shader = waveShader; waveP.alpha = 34 - 10 * k
+            c.drawPath(wave, waveP)
+        }
+        for (pt in pts) {
+            pt.y -= pt.sp * dt
+            if (pt.y < -20f) { pt.y = h + 20f; pt.x = rnd.nextFloat() * w }
+            val px = pt.x + sin(tNow * .6f + pt.ph) * 14f
+            val tw = .55f + .45f * sin(tNow * 1.6f + pt.ph)
+            val r = pt.r * 5f
+            glowP[pt.ci].alpha = (230 * tw).toInt().coerceIn(30, 255)
+            c.drawBitmap(glow, null, RectF(px - r, pt.y - r, px + r, pt.y + r), glowP[pt.ci])
+        }
+    }
 
     private fun s() = min(width * .55f, height * .42f)
 
@@ -112,6 +186,30 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         }
     }
 
+    // Tile with slight 3D turn, soft reflection and a gradient glow border when selected
+    private fun tile3d(c: Canvas, i: Item, cx: Float, cy: Float, size: Float, alpha: Int, rot: Float, z: Float, near: Float) {
+        val half = size * aspOf(i) / 2
+        val r = RectF(-half, -size / 2, half, size / 2)
+        cam.save(); cam.translate(0f, 0f, z); cam.rotateY(rot); cam.getMatrix(m); cam.restore()
+        m.postTranslate(cx, cy)
+        c.save(); c.concat(m)
+        p.alpha = alpha; c.drawBitmap(artOf(i), null, r, p); p.alpha = 255
+        val rb = r.bottom; val rh = size * .5f
+        val layer = c.saveLayer(r.left, rb, r.right, rb + rh, null)
+        c.save(); c.translate(0f, 2 * rb); c.scale(1f, -1f); c.drawBitmap(artOf(i), null, r, p); c.restore()
+        mask.shader = LinearGradient(0f, rb, 0f, rb + rh, 0x55FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
+        c.drawRect(r.left, rb, r.right, rb + rh, mask)
+        c.restoreToCount(layer)
+        if (near > .05f) {
+            val a = (255 * near).toInt()
+            bp.shader = LinearGradient(r.left, r.top, r.right, r.bottom, palette[0], palette[2], Shader.TileMode.CLAMP)
+            bp.strokeWidth = size * .05f; bp.alpha = a / 4; c.drawRect(r, bp)
+            bp.strokeWidth = size * .016f; bp.alpha = a; c.drawRect(r, bp)
+            bp.shader = null
+        }
+        c.restore()
+    }
+
     override fun onDraw(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
         bg.shader = RadialGradient(w / 2, h * .35f, max(w, h) * .8f, bgA, bgB, Shader.TileMode.CLAMP)
@@ -123,19 +221,38 @@ class CoverFlowView(ctx: Context) : View(ctx) {
             c.drawBitmap(bi, null, RectF((w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2), p)
             c.drawRect(0f, 0f, w, h, dim)
         }
+        if (fx) drawFx(c, w, h)
+        c.drawText("flow", 48f, 100f, mark)
         if (items.isEmpty()) {
             txt.textSize = 44f; txt.alpha = 160
             emptyHint.split("\n").forEachIndexed { i, l -> c.drawText(l, w / 2, h / 2 + i * 60f, txt) }
-            txt.alpha = 255; return
+            txt.alpha = 255
+            if (fx) postInvalidateOnAnimation()
+            return
         }
-        when (mode) { 1 -> ps4(c, w, h); 2 -> blades(c, w, h); 3 -> switchRow(c, w, h); else -> flow(c, w, h) }
+        when (mode) { 1 -> flow(c, w, h); 2 -> blades(c, w, h); 3 -> switchRow(c, w, h); else -> flowPs4(c, w, h) }
         val cur = items[pos.roundToInt().coerceIn(0, items.size - 1)]
         txt.textSize = 58f; c.drawText(cur.label, w / 2, h * .86f, txt)
         txt.textSize = 34f; txt.alpha = 140
         c.drawText("A / tap: launch · X / long-press: game options · Start / ⚙: settings", w / 2, h * .86f + 60f, txt)
         txt.alpha = 255
+        if (fx) postInvalidateOnAnimation()
     }
 
+    // New default: PS4-style row with a light Cover Flow turn
+    private fun flowPs4(c: Canvas, w: Float, h: Float) {
+        val t = min(h * .29f, w * .19f); val cy = h * .45f
+        for (i in order()) {
+            val d = i - pos
+            if (abs(d) > 5) continue
+            val near = 1f - min(1f, abs(d))
+            val sg = d.coerceIn(-1f, 1f)
+            val x = w / 2 + d * t * 1.06f + sg * t * .2f
+            tile3d(c, items[i], x, cy - near * t * .05f, t * (1f + .32f * near), (150 + 105 * near).toInt(), -sg * 22f, abs(sg) * t * .18f, near)
+        }
+    }
+
+    // Classic Cover Flow
     private fun flow(c: Canvas, w: Float, h: Float) {
         val s = s(); val cy = h * .42f
         mask.shader = LinearGradient(0f, s, 0f, s * 1.6f, 0x66FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
@@ -157,17 +274,6 @@ class CoverFlowView(ctx: Context) : View(ctx) {
             c.drawRect(0f, s, s, s * 1.6f, mask)
             c.restoreToCount(layer)
             c.restore()
-        }
-    }
-
-    private fun ps4(c: Canvas, w: Float, h: Float) {
-        val t = min(h * .30f, w * .2f); val cy = h * .45f
-        for (i in order()) {
-            val d = i - pos
-            if (abs(d) > 7) continue
-            val near = 1f - min(1f, abs(d))
-            val x = w / 2 + d * t * 1.15f + d.coerceIn(-1f, 1f) * t * .25f
-            tile(c, items[i], x, cy, t * (1f + .3f * near), (150 + 105 * near).toInt(), Color.argb((255 * near).toInt(), 255, 255, 255), 6f)
         }
     }
 
