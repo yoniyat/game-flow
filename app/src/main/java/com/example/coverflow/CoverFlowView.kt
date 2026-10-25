@@ -25,6 +25,8 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         set(v) { field = v; invalidate() }
     var bgB = 0xFF050507.toInt()
         set(v) { field = v; invalidate() }
+    var bgImage: Bitmap? = null
+        set(v) { field = v; invalidate() }
     var emptyHint = ""
     var onLaunch: (Item) -> Unit = {}
     var onLong: (Item) -> Unit = {}
@@ -40,6 +42,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
     private val mask = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) }
     private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textAlign = Paint.Align.CENTER; isFakeBoldText = true }
     private val bg = Paint()
+    private val dim = Paint().apply { color = 0x99000000.toInt() }
     private val bp = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val fillP = Paint(Paint.ANTI_ALIAS_FLAG)
 
@@ -61,6 +64,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
     }
 
     fun move(d: Int) { snap(pos.roundToInt() + d.toFloat()) }
+    fun goTo(i: Int) { anim?.cancel(); pos = i.coerceIn(0, max(0, items.size - 1)).toFloat(); lastIdx = pos.roundToInt(); invalidate() }
     fun current(): Item? = items.getOrNull(pos.roundToInt())
     fun launchCurrent() { current()?.let(onLaunch) }
 
@@ -95,7 +99,6 @@ class CoverFlowView(ctx: Context) : View(ctx) {
     }
     private fun order() = items.indices.sortedByDescending { abs(it - pos) }
 
-    // Flat tile with optional glowing border
     private fun tile(c: Canvas, i: Item, cx: Float, cy: Float, size: Float, alpha: Int, border: Int, bw: Float) {
         val half = size * aspOf(i) / 2
         val r = RectF(cx - half, cy - size / 2, cx + half, cy + size / 2)
@@ -113,6 +116,13 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         val w = width.toFloat(); val h = height.toFloat()
         bg.shader = RadialGradient(w / 2, h * .35f, max(w, h) * .8f, bgA, bgB, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, bg)
+        val bi = bgImage
+        if (bi != null) {
+            val sc = max(w / bi.width, h / bi.height)
+            val dw = bi.width * sc; val dh = bi.height * sc
+            c.drawBitmap(bi, null, RectF((w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2), p)
+            c.drawRect(0f, 0f, w, h, dim)
+        }
         if (items.isEmpty()) {
             txt.textSize = 44f; txt.alpha = 160
             emptyHint.split("\n").forEachIndexed { i, l -> c.drawText(l, w / 2, h / 2 + i * 60f, txt) }
@@ -150,7 +160,6 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         }
     }
 
-    // PS4 style: one row of tiles, selected one bigger with a white glow
     private fun ps4(c: Canvas, w: Float, h: Float) {
         val t = min(h * .30f, w * .2f); val cy = h * .45f
         for (i in order()) {
@@ -162,7 +171,6 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         }
     }
 
-    // Xbox 360 style: tall panels with green edges
     private fun blades(c: Canvas, w: Float, h: Float) {
         val s = s(); val cy = h * .45f; val ph = s * 1.2f
         for (i in order()) {
@@ -180,7 +188,6 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         }
     }
 
-    // Switch style: row of tiles, selected one has a cyan border, dots show position
     private fun switchRow(c: Canvas, w: Float, h: Float) {
         val t = min(h * .26f, w * .17f); val cy = h * .45f
         for (i in order()) {
