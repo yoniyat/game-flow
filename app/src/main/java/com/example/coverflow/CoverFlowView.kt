@@ -17,7 +17,13 @@ class Item(val pkg: String, val label: String, val icon: Bitmap, val album: Bitm
 
 class CoverFlowView(ctx: Context) : View(ctx) {
     var items: List<Item> = emptyList()
-        set(v) { field = v; pos = pos.coerceIn(0f, max(0, v.size - 1).toFloat()); invalidate() }
+        set(v) {
+            field = v
+            pos = pos.coerceIn(0f, max(0, v.size - 1).toFloat())
+            lastIdx = pos.roundToInt()
+            invalidate()
+            onSelect(v.getOrNull(lastIdx))
+        }
     var style = 0
         set(v) { field = v; invalidate() }
     var mode = 0
@@ -34,6 +40,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
     var onLaunch: (Item) -> Unit = {}
     var onLong: (Item) -> Unit = {}
     var onTick: () -> Unit = {}
+    var onSelect: (Item?) -> Unit = {}
 
     private var pos = 0f
     private var lastIdx = -1
@@ -50,6 +57,29 @@ class CoverFlowView(ctx: Context) : View(ctx) {
     private val dim = Paint().apply { color = 0x99000000.toInt() }
     private val bp = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val fillP = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    // ---- Hover preview: faded, soft game art behind everything ----
+    private var hoverBmp: Bitmap? = null
+    private var hoverA = 0f
+    private var hoverAnim: ValueAnimator? = null
+
+    fun showHover(b: Bitmap?) {
+        hoverAnim?.cancel()
+        if (b != null) {
+            hoverBmp = Bitmap.createScaledBitmap(b, max(8, b.width / 24), max(8, b.height / 24), true)
+            hoverAnim = ValueAnimator.ofFloat(hoverA, 1f).apply {
+                duration = 900
+                addUpdateListener { hoverA = it.animatedValue as Float; invalidate() }
+                start()
+            }
+        } else {
+            hoverAnim = ValueAnimator.ofFloat(hoverA, 0f).apply {
+                duration = 300
+                addUpdateListener { hoverA = it.animatedValue as Float; invalidate() }
+                start()
+            }
+        }
+    }
 
     // ---- Flow effects: glows, waves, particles ----
     private class Pt(var x: Float, var y: Float, val r: Float, val sp: Float, val ph: Float, val ci: Int)
@@ -124,7 +154,11 @@ class CoverFlowView(ctx: Context) : View(ctx) {
 
     private fun tickCheck() {
         val i = pos.roundToInt()
-        if (i != lastIdx) { if (lastIdx != -1) onTick(); lastIdx = i }
+        if (i != lastIdx) {
+            if (lastIdx != -1) onTick()
+            lastIdx = i
+            onSelect(items.getOrNull(i))
+        }
     }
 
     private fun snap(target: Float) {
@@ -138,7 +172,10 @@ class CoverFlowView(ctx: Context) : View(ctx) {
     }
 
     fun move(d: Int) { snap(pos.roundToInt() + d.toFloat()) }
-    fun goTo(i: Int) { anim?.cancel(); pos = i.coerceIn(0, max(0, items.size - 1)).toFloat(); lastIdx = pos.roundToInt(); invalidate() }
+    fun goTo(i: Int) {
+        anim?.cancel(); pos = i.coerceIn(0, max(0, items.size - 1)).toFloat()
+        lastIdx = pos.roundToInt(); invalidate(); onSelect(items.getOrNull(lastIdx))
+    }
     fun current(): Item? = items.getOrNull(pos.roundToInt())
     fun launchCurrent() { current()?.let(onLaunch) }
 
@@ -194,12 +231,12 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         m.postTranslate(cx, cy)
         c.save(); c.concat(m)
         p.alpha = alpha; c.drawBitmap(artOf(i), null, r, p); p.alpha = 255
-                val art = artOf(i); val n = 10; val frac = .3f
+        val art = artOf(i); val n = 12; val frac = .3f
         c.save(); c.translate(0f, 2 * r.bottom); c.scale(1f, -1f)
         for (k in 0 until n) {
             val src = Rect(0, (art.height * (1f - (k + 1) * frac / n)).toInt(), art.width, (art.height * (1f - k * frac / n)).toInt())
             val dst = RectF(r.left, r.bottom - (k + 1) * size * frac / n, r.right, r.bottom - k * size * frac / n)
-            p.alpha = (alpha * .4f * (1f - k / n.toFloat())).toInt()
+            p.alpha = (alpha * .4f * (1f - k / n.toFloat())).toInt().coerceIn(0, 255)
             c.drawBitmap(art, src, dst, p)
         }
         p.alpha = 255
@@ -225,6 +262,14 @@ class CoverFlowView(ctx: Context) : View(ctx) {
             c.drawBitmap(bi, null, RectF((w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2), p)
             c.drawRect(0f, 0f, w, h, dim)
         }
+        val hb = hoverBmp
+        if (hb != null && hoverA > .01f) {
+            val sc = max(w / hb.width, h / hb.height)
+            val dw = hb.width * sc; val dh = hb.height * sc
+            p.alpha = (hoverA * 130).toInt().coerceIn(0, 255)
+            c.drawBitmap(hb, null, RectF((w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2), p)
+            p.alpha = 255
+        }
         if (fx) drawFx(c, w, h)
         c.drawText("flow", 48f, 100f, mark)
         if (items.isEmpty()) {
@@ -243,7 +288,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         if (fx) postInvalidateOnAnimation()
     }
 
-    // New default: PS4-style row with a light Cover Flow turn
+    // Default: PS4-style row with a light Cover Flow turn
     private fun flowPs4(c: Canvas, w: Float, h: Float) {
         val t = min(h * .29f, w * .19f); val cy = h * .45f
         for (i in order()) {
