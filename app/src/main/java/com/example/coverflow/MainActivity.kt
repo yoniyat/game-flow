@@ -28,7 +28,7 @@ class MainActivity : Activity() {
     var style = 0
     var layout = 0
     var fx = true
-    var theme = 6
+    var themeIdx = 6
     private var lastStick = 0L
     private var lastMenuStick = 0L
     var pendingPkg: String? = null
@@ -61,7 +61,7 @@ class MainActivity : Activity() {
         fx = prefs.getBoolean("fx", true)
         hoverOn = prefs.getBoolean("hover", true)
         dwellMs = prefs.getLong("dwell", 2000L)
-        theme = prefs.getInt("theme5", 6).coerceIn(0, themes.size - 1)
+        themeIdx = prefs.getInt("theme5", 6).coerceIn(0, themes.size - 1)
         audio.sound = prefs.getBoolean("sound", true)
         audio.musicOn = prefs.getBoolean("music", true)
         audio.loadScroll()
@@ -95,7 +95,7 @@ class MainActivity : Activity() {
 
     override fun onBackPressed() { if (menu.isOpen) menu.back() else super.onBackPressed() }
 
-    fun applyTheme() { flow.bgA = themes[theme].second.toInt(); flow.bgB = themes[theme].third.toInt() }
+    fun applyTheme() { flow.bgA = themes[themeIdx].second.toInt(); flow.bgB = themes[themeIdx].third.toInt() }
     fun covers() = File(filesDir, "covers").apply { mkdirs() }
     fun bgs() = File(filesDir, "bg").apply { mkdirs() }
     fun loadBg() {
