@@ -3,6 +3,32 @@ package com.example.coverflow
 import android.graphics.*
 import android.graphics.drawable.Drawable
 
+const val SETTINGS_PKG = "__settings__"
+
+// Big gradient gear tile that sits first in the row
+fun makeSettingsArt(): Pair<Bitmap, Bitmap> {
+    fun draw(size: Int, round: Boolean): Bitmap {
+        val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(b)
+        val s = size.toFloat()
+        if (round) c.clipPath(Path().apply { addRoundRect(RectF(0f, 0f, s, s), s * .2f, s * .2f, Path.Direction.CW) })
+        c.drawRect(0f, 0f, s, s, Paint().apply {
+            shader = LinearGradient(0f, 0f, s, s, intArrayOf(0xFF4DE8FF.toInt(), 0xFF2F7BFF.toInt(), 0xFFA35CFF.toInt()), null, Shader.TileMode.CLAMP)
+        })
+        val white = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+        c.save(); c.translate(s / 2, s / 2)
+        for (i in 0 until 8) {
+            c.drawRoundRect(RectF(-s * .07f, -s * .37f, s * .07f, -s * .2f), s * .02f, s * .02f, white)
+            c.rotate(45f)
+        }
+        c.drawCircle(0f, 0f, s * .26f, white)
+        c.drawCircle(0f, 0f, s * .1f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF14214F.toInt() })
+        c.restore()
+        return b
+    }
+    return draw(256, true) to draw(320, false)
+}
+
 // Returns (normal rounded icon, album-cover square)
 fun makeArt(d: Drawable, label: String): Pair<Bitmap, Bitmap> {
     val n = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
