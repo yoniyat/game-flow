@@ -20,14 +20,14 @@ fun MainActivity.rootMenu(): Menu = Menu("Settings", listOf(
     hdr("Look"),
     cyc("Layout", { layoutNames[layout] }) { d ->
         layout = (layout + d + 4) % 4; flow.mode = layout
-        theme = layoutThemes[layout]; applyTheme(); loadBg()
-        prefs.edit().putInt("layout5", layout).putInt("theme5", theme).apply()
+        themeIdx = layoutThemes[layout]; applyTheme(); loadBg()
+        prefs.edit().putInt("layout5", layout).putInt("theme5", themeIdx).apply()
     },
     cyc("Style", { styleNames[style] }) { d ->
         style = (style + d + 3) % 3; prefs.edit().putInt("style", style).apply(); flow.style = style
     },
-    cyc("Background colour", { themes[theme].first }) { d ->
-        theme = (theme + d + themes.size) % themes.size; prefs.edit().putInt("theme5", theme).apply(); applyTheme()
+    cyc("Background colour", { themes[themeIdx].first }) { d ->
+        themeIdx = (themeIdx + d + themes.size) % themes.size; prefs.edit().putInt("theme5", themeIdx).apply(); applyTheme()
     },
     act("Background picture", { if (File(bgs(), "$layout.jpg").exists()) "Set" else "None" }) { menu.push(bgMenu()) },
     tog("Particles & waves", { fx }) { fx = it; prefs.edit().putBoolean("fx", it).apply(); flow.fx = it },
