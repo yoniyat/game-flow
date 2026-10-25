@@ -12,12 +12,16 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-class Item(val pkg: String, val label: String, val icon: Bitmap, val album: Bitmap)
+class Item(val pkg: String, val label: String, val icon: Bitmap, val album: Bitmap, val cover: Bitmap?)
 
 class CoverFlowView(ctx: Context) : View(ctx) {
     var items: List<Item> = emptyList()
         set(v) { field = v; pos = pos.coerceIn(0f, max(0, v.size - 1).toFloat()); invalidate() }
-    var album = false
+    var style = 0
+        set(v) { field = v; invalidate() }
+    var bgA = 0xFF30303A.toInt()
+        set(v) { field = v; invalidate() }
+    var bgB = 0xFF050507.toInt()
         set(v) { field = v; invalidate() }
     var emptyHint = ""
     var onLaunch: (Item) -> Unit = {}
@@ -46,14 +50,15 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         val t = target.roundToInt().coerceIn(0, max(0, items.size - 1)).toFloat()
         anim?.cancel()
         anim = ValueAnimator.ofFloat(pos, t).apply {
-            duration = 320; interpolator = DecelerateInterpolator()
+            duration = 240; interpolator = DecelerateInterpolator()
             addUpdateListener { pos = it.animatedValue as Float; tickCheck(); invalidate() }
             start()
         }
     }
 
     fun move(d: Int) { snap(pos.roundToInt() + d.toFloat()) }
-    fun launchCurrent() { items.getOrNull(pos.roundToInt())?.let(onLaunch) }
+    fun current(): Item? = items.getOrNull(pos.roundToInt())
+    fun launchCurrent() { current()?.let(onLaunch) }
 
     private val gd = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean { anim?.cancel(); handled = false; return true }
@@ -70,7 +75,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
             else snap(pos + if (e.x < cx) -1 else 1)
             return true
         }
-        override fun onLongPress(e: MotionEvent) { handled = true; items.getOrNull(pos.roundToInt())?.let(onLong) }
+        override fun onLongPress(e: MotionEvent) { handled = true; current()?.let(onLong) }
     })
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -81,7 +86,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
 
     override fun onDraw(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat()
-        bg.shader = RadialGradient(w / 2, h * .35f, max(w, h) * .8f, 0xFF30303A.toInt(), 0xFF050507.toInt(), Shader.TileMode.CLAMP)
+        bg.shader = RadialGradient(w / 2, h * .35f, max(w, h) * .8f, bgA, bgB, Shader.TileMode.CLAMP)
         c.drawRect(0f, 0f, w, h, bg)
         if (items.isEmpty()) {
             txt.textSize = 44f; txt.alpha = 160
@@ -89,12 +94,14 @@ class CoverFlowView(ctx: Context) : View(ctx) {
             txt.alpha = 255; return
         }
         val s = s(); val cy = h * .42f
-        val rect = RectF(0f, 0f, s, s)
         mask.shader = LinearGradient(0f, s, 0f, s * 1.6f, 0x66FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
         for (i in items.indices.sortedByDescending { abs(it - pos) }) {
             val d = i - pos
             if (abs(d) > 5) continue
-            val bmp = if (album) items[i].album else items[i].icon
+            val it = items[i]
+            val bmp = when (style) { 1 -> it.album; 2 -> it.cover ?: it.album; else -> it.icon }
+            val bw = if (style == 2 && it.cover != null) s * (it.cover.width.toFloat() / it.cover.height).coerceIn(.5f, 1f) else s
+            val rect = RectF((s - bw) / 2, 0f, (s + bw) / 2, s)
             val t = d.coerceIn(-1f, 1f)
             val x = w / 2 + t * s * .62f + (d - t) * s * .28f
             cam.save(); cam.translate(0f, 0f, abs(t) * s * .35f); cam.rotateY(-t * 62f); cam.getMatrix(m); cam.restore()
@@ -109,7 +116,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         }
         val cur = items[pos.roundToInt().coerceIn(0, items.size - 1)]
         txt.textSize = 58f; c.drawText(cur.label, w / 2, h * .86f, txt)
-        txt.textSize = 36f; txt.alpha = 140
-        c.drawText("Tap or press A to launch · long-press to edit library", w / 2, h * .86f + 60f, txt); txt.alpha = 255
+        txt.textSize = 34f; txt.alpha = 140
+        c.drawText("A / tap: launch · X / long-press: game options · Start / ⚙: settings", w / 2, h * .86f + 60f, txt); txt.alpha = 255
     }
 }
