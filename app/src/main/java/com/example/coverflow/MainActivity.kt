@@ -17,9 +17,9 @@ import android.view.Gravity
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
-import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.TextView
 import android.widget.Toast
 import java.io.File
 import kotlin.math.abs
@@ -32,7 +32,8 @@ class MainActivity : Activity() {
     private var layout = 0
     private var sound = true
     private var musicOn = true
-    private var theme = 0
+    private var fx = true
+    private var theme = 6
     private var tone: ToneGenerator? = null
     private var mp: MediaPlayer? = null
     private var music: MediaPlayer? = null
@@ -50,33 +51,41 @@ class MainActivity : Activity() {
     }
     private val sortNames = listOf("A–Z", "Recently played", "My order")
     private val styleNames = listOf("Normal icons", "Album covers", "Game covers")
-    private val layoutNames = listOf("Cover Flow", "PS4 style", "Xbox 360 style", "Switch style")
-    private val layoutThemes = listOf(0, 1, 4, 5)
+    private val layoutNames = listOf("Flow", "Cover Flow", "Xbox 360 style", "Switch style")
+    private val layoutThemes = listOf(6, 0, 4, 5)
     private val themes = listOf(
         Triple("Grey", 0xFF30303A, 0xFF050507), Triple("Blue", 0xFF1B3A6B, 0xFF040A18),
         Triple("Purple", 0xFF4A2A7A, 0xFF0A0614), Triple("Red", 0xFF6B1B1B, 0xFF180404),
-        Triple("Green", 0xFF1B5A32, 0xFF04120A), Triple("Black", 0xFF111111, 0xFF000000)
+        Triple("Green", 0xFF1B5A32, 0xFF04120A), Triple("Black", 0xFF111111, 0xFF000000),
+        Triple("Flow", 0xFF14214F, 0xFF03040B)
     )
+
+    private fun dlg() = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         sort = prefs.getInt("sort", 0).coerceIn(0, 2)
         style = prefs.getInt("style", 0)
-        layout = prefs.getInt("layout", 0).coerceIn(0, 3)
+        layout = prefs.getInt("layout5", 0).coerceIn(0, 3)
         sound = prefs.getBoolean("sound", true)
         musicOn = prefs.getBoolean("music", true)
-        theme = prefs.getInt("theme", 0).coerceIn(0, themes.size - 1)
+        fx = prefs.getBoolean("fx", true)
+        theme = prefs.getInt("theme5", 6).coerceIn(0, themes.size - 1)
         tone = try { ToneGenerator(AudioManager.STREAM_MUSIC, 40) } catch (e: Exception) { null }
         loadScroll()
         flow = CoverFlowView(this)
         flow.style = style
         flow.mode = layout
+        flow.fx = fx
         applyTheme()
         loadBg()
-        val gear = Button(this).apply { text = "⚙"; textSize = 22f; minWidth = 0; minimumWidth = 0; setOnClickListener { showSettings() } }
+        val gear = TextView(this).apply {
+            text = "⚙"; textSize = 26f; setTextColor(0xCCFFFFFF.toInt()); setPadding(24, 12, 24, 12)
+            setOnClickListener { showSettings() }
+        }
         val root = FrameLayout(this)
         root.addView(flow)
-        root.addView(gear, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, 48, 24, 0) })
+        root.addView(gear, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, 36, 16, 0) })
         setContentView(root)
         flow.onLaunch = { item -> launch(item) }
         flow.onLong = { item -> gameMenu(item) }
@@ -145,7 +154,7 @@ class MainActivity : Activity() {
 
     private fun soundMenu(kind: String) {
         val name = if (kind == "scroll") "Scroll sound" else "Launch sound"
-        AlertDialog.Builder(this).setTitle(name)
+        dlg().setTitle(name)
             .setItems(arrayOf("Choose audio file", "Use default sound")) { _, w ->
                 if (w == 0) { pendingSound = kind; pickAudio() }
                 else {
@@ -157,7 +166,7 @@ class MainActivity : Activity() {
     }
 
     private fun musicMenu() {
-        AlertDialog.Builder(this).setTitle("Lobby music")
+        dlg().setTitle("Lobby music")
             .setItems(arrayOf(if (musicOn) "Turn off" else "Turn on", "Choose music file", "Remove music file")) { _, w ->
                 when (w) {
                     0 -> { musicOn = !musicOn; prefs.edit().putBoolean("music", musicOn).apply(); startMusic(); showSettings() }
@@ -199,9 +208,10 @@ class MainActivity : Activity() {
             "Launch sound: " + if (File(sounds(), "launch.snd").exists()) "Custom" else "Default",
             "Lobby music: $lobby",
             "Background colour: " + themes[theme].first,
-            "Background picture: " + if (File(bgs(), "$layout.jpg").exists()) "Set" else "None"
+            "Background picture: " + if (File(bgs(), "$layout.jpg").exists()) "Set" else "None",
+            "Particles & waves: " + if (fx) "On" else "Off"
         )
-        AlertDialog.Builder(this).setTitle("Settings").setItems(items) { _, w ->
+        dlg().setTitle("Settings").setItems(items) { _, w ->
             var reopen = true
             when (w) {
                 0 -> { addGame(); reopen = false }
@@ -209,22 +219,23 @@ class MainActivity : Activity() {
                 2 -> {
                     layout = (layout + 1) % 4; flow.mode = layout
                     theme = layoutThemes[layout]; applyTheme(); loadBg()
-                    prefs.edit().putInt("layout", layout).putInt("theme", theme).apply()
+                    prefs.edit().putInt("layout5", layout).putInt("theme5", theme).apply()
                 }
                 3 -> { style = (style + 1) % 3; prefs.edit().putInt("style", style).apply(); flow.style = style }
                 4 -> { sound = !sound; prefs.edit().putBoolean("sound", sound).apply() }
                 5 -> { soundMenu("scroll"); reopen = false }
                 6 -> { soundMenu("launch"); reopen = false }
                 7 -> { musicMenu(); reopen = false }
-                8 -> { theme = (theme + 1) % themes.size; prefs.edit().putInt("theme", theme).apply(); applyTheme() }
+                8 -> { theme = (theme + 1) % themes.size; prefs.edit().putInt("theme5", theme).apply(); applyTheme() }
                 9 -> { bgMenu(); reopen = false }
+                10 -> { fx = !fx; prefs.edit().putBoolean("fx", fx).apply(); flow.fx = fx }
             }
             if (reopen) showSettings()
         }.setNegativeButton("Close", null).show()
     }
 
     private fun bgMenu() {
-        AlertDialog.Builder(this).setTitle("Background picture (" + layoutNames[layout] + ")")
+        dlg().setTitle("Background picture (" + layoutNames[layout] + ")")
             .setItems(arrayOf("Choose picture", "Remove picture")) { _, w ->
                 if (w == 0) {
                     pendingBg = layout
@@ -250,7 +261,7 @@ class MainActivity : Activity() {
     private fun showAddDialog(apps: List<Pair<String, String>>) {
         if (apps.isEmpty()) { Toast.makeText(this, "No other apps found", Toast.LENGTH_SHORT).show(); return }
         val checked = BooleanArray(apps.size)
-        AlertDialog.Builder(this).setTitle("Add games")
+        dlg().setTitle("Add games")
             .setMultiChoiceItems(apps.map { it.second }.toTypedArray(), checked) { _, i, v -> checked[i] = v }
             .setPositiveButton("Add") { _, _ ->
                 val add = apps.filterIndexed { i, _ -> checked[i] }.map { it.first }
@@ -263,7 +274,7 @@ class MainActivity : Activity() {
     }
 
     private fun gameMenu(item: Item) {
-        AlertDialog.Builder(this).setTitle(item.label)
+        dlg().setTitle(item.label)
             .setItems(arrayOf("Hide from library", "Rename", "Set cover image", "Remove cover image", "Move left", "Move right")) { _, w ->
                 when (w) {
                     0 -> hideGame(item)
@@ -281,7 +292,7 @@ class MainActivity : Activity() {
 
     private fun renameGame(item: Item) {
         val et = EditText(this).apply { setText(item.label); setSelectAllOnFocus(true); setSingleLine() }
-        AlertDialog.Builder(this).setTitle("Rename (empty = original name)").setView(et)
+        dlg().setTitle("Rename (empty = original name)").setView(et)
             .setPositiveButton("Save") { _, _ ->
                 val t = et.text.toString().trim()
                 val ed = prefs.edit()
@@ -418,19 +429,4 @@ class MainActivity : Activity() {
         val n = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
         val c = Canvas(n)
         c.clipPath(Path().apply { addRoundRect(RectF(0f, 0f, 256f, 256f), 52f, 52f, Path.Direction.CW) })
-        d.setBounds(0, 0, 256, 256); d.draw(c)
-
-        val a = Bitmap.createBitmap(320, 320, Bitmap.Config.ARGB_8888)
-        val avg = Bitmap.createScaledBitmap(n, 1, 1, true).getPixel(0, 0) or 0xFF000000.toInt()
-        val dark = Color.rgb(Color.red(avg) / 3, Color.green(avg) / 3, Color.blue(avg) / 3)
-                val ac = Canvas(a)
-        ac.drawRect(0f, 0f, 320f, 320f, Paint().apply { shader = LinearGradient(0f, 0f, 320f, 320f, avg, dark, Shader.TileMode.CLAMP) })
-        d.setBounds(60, 40, 260, 240); d.draw(ac)
-        ac.drawRect(60f, 40f, 260f, 240f, Paint().apply { style = Paint.Style.STROKE; strokeWidth = 3f; color = 0x66FFFFFF })
-        val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 26f; isFakeBoldText = true; setShadowLayer(4f, 0f, 2f, Color.BLACK) }
-        var t = label.uppercase()
-        while (t.length > 1 && tp.measureText(t) > 290f) t = t.dropLast(1)
-        ac.drawText(t, 16f, 296f, tp)
-        return n to a
-    }
-}
+        d.setBounds(0, 0, 256, 256)
