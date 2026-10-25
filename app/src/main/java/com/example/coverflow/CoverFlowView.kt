@@ -194,12 +194,16 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         m.postTranslate(cx, cy)
         c.save(); c.concat(m)
         p.alpha = alpha; c.drawBitmap(artOf(i), null, r, p); p.alpha = 255
-        val rb = r.bottom; val rh = size * .5f
-        val layer = c.saveLayer(r.left, rb, r.right, rb + rh, null)
-        c.save(); c.translate(0f, 2 * rb); c.scale(1f, -1f); c.drawBitmap(artOf(i), null, r, p); c.restore()
-        mask.shader = LinearGradient(0f, rb, 0f, rb + rh, 0x55FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
-        c.drawRect(r.left, rb, r.right, rb + rh, mask)
-        c.restoreToCount(layer)
+                val art = artOf(i); val n = 10; val frac = .3f
+        c.save(); c.translate(0f, 2 * r.bottom); c.scale(1f, -1f)
+        for (k in 0 until n) {
+            val src = Rect(0, (art.height * (1f - (k + 1) * frac / n)).toInt(), art.width, (art.height * (1f - k * frac / n)).toInt())
+            val dst = RectF(r.left, r.bottom - (k + 1) * size * frac / n, r.right, r.bottom - k * size * frac / n)
+            p.alpha = (alpha * .4f * (1f - k / n.toFloat())).toInt()
+            c.drawBitmap(art, src, dst, p)
+        }
+        p.alpha = 255
+        c.restore()
         if (near > .05f) {
             val a = (255 * near).toInt()
             bp.shader = LinearGradient(r.left, r.top, r.right, r.bottom, palette[0], palette[2], Shader.TileMode.CLAMP)
