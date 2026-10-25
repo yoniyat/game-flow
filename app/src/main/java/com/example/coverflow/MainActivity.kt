@@ -6,8 +6,12 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.*
 import android.graphics.drawable.Drawable
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.MediaPlayer
+import android.media.SoundPool
 import android.media.ToneGenerator
+import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.InputDevice
@@ -15,6 +19,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.Toast
 import java.io.File
 import kotlin.math.abs
 
@@ -23,13 +28,24 @@ class MainActivity : Activity() {
     private lateinit var flow: CoverFlowView
     private var all = false
     private var style = 0
+    private var layout = 0
     private var sound = true
     private var theme = 0
     private var tone: ToneGenerator? = null
+    private var mp: MediaPlayer? = null
+    private var scrollId = 0
     private var lastStick = 0L
     private var pendingPkg: String? = null
+    private var pendingSound: String? = null
     private val prefs by lazy { getSharedPreferences("library", MODE_PRIVATE) }
+    private val sp by lazy {
+        SoundPool.Builder().setMaxStreams(4).setAudioAttributes(
+            AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
+        ).build()
+    }
     private val styleNames = listOf("Normal icons", "Album covers", "Game covers")
+    private val layoutNames = listOf("Cover Flow", "PS4 style", "Xbox 360 style", "Switch style")
+    private val layoutThemes = listOf(0, 1, 4, 5)
     private val themes = listOf(
         Triple("Grey", 0xFF30303A, 0xFF050507), Triple("Blue", 0xFF1B3A6B, 0xFF040A18),
         Triple("Purple", 0xFF4A2A7A, 0xFF0A0614), Triple("Red", 0xFF6B1B1B, 0xFF180404),
@@ -39,43 +55,120 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         style = prefs.getInt("style", 0)
+        layout = prefs.getInt("layout", 0).coerceIn(0, 3)
         sound = prefs.getBoolean("sound", true)
         theme = prefs.getInt("theme", 0).coerceIn(0, themes.size - 1)
         tone = try { ToneGenerator(AudioManager.STREAM_MUSIC, 40) } catch (e: Exception) { null }
+        loadScroll()
         flow = CoverFlowView(this)
         flow.style = style
+        flow.mode = layout
         applyTheme()
         val gear = Button(this).apply { text = "⚙"; textSize = 22f; minWidth = 0; minimumWidth = 0; setOnClickListener { showSettings() } }
         val root = FrameLayout(this)
         root.addView(flow)
-        root.addView(gear, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, 72, 24, 0) })
+        root.addView(gear, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { setMargins(0, 48, 24, 0) })
         setContentView(root)
         flow.onLaunch = { item -> launch(item) }
         flow.onLong = { item -> gameMenu(item) }
-        flow.onTick = { if (sound) tone?.startTone(ToneGenerator.TONE_DTMF_S, 20) }
+        flow.onTick = { playTick() }
     }
 
-    override fun onDestroy() { tone?.release(); super.onDestroy() }
+    override fun onDestroy() { tone?.release(); mp?.release(); sp.release(); super.onDestroy() }
     override fun onResume() { super.onResume(); refresh() }
 
     private fun applyTheme() { flow.bgA = themes[theme].second.toInt(); flow.bgB = themes[theme].third.toInt() }
     private fun covers() = File(filesDir, "covers").apply { mkdirs() }
+    private fun sounds() = File(filesDir, "sounds").apply { mkdirs() }
 
+    // ---------- Sounds ----------
+    private fun loadScroll() {
+        val f = File(sounds(), "scroll.snd")
+        scrollId = if (f.exists()) sp.load(f.path, 1) else 0
+    }
+
+    private fun playTick() {
+        if (!sound) return
+        if (scrollId != 0) sp.play(scrollId, 1f, 1f, 1, 0, 1f) else tone?.startTone(ToneGenerator.TONE_DTMF_S, 20)
+    }
+
+    private fun playLaunch() {
+        if (!sound) return
+        val f = File(sounds(), "launch.snd")
+        if (f.exists()) {
+            try {
+                mp?.release()
+                mp = MediaPlayer().apply {
+                    setDataSource(f.path)
+                    setOnPreparedListener { it.start() }
+                    setOnCompletionListener { it.release(); if (mp === it) mp = null }
+                    prepareAsync()
+                }
+                return
+            } catch (e: Exception) { }
+        }
+        tone?.startTone(ToneGenerator.TONE_PROP_ACK, 120)
+    }
+
+    private fun soundMenu(kind: String) {
+        val name = if (kind == "scroll") "Scroll sound" else "Launch sound"
+        AlertDialog.Builder(this).setTitle(name)
+            .setItems(arrayOf("Choose audio file", "Use default sound")) { _, w ->
+                if (w == 0) {
+                    pendingSound = kind
+                    startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*"), 8)
+                } else {
+                    File(sounds(), "$kind.snd").delete()
+                    if (kind == "scroll") loadScroll()
+                    showSettings()
+                }
+            }.setNegativeButton("Back") { _, _ -> showSettings() }.show()
+    }
+
+    private fun saveSound(uri: Uri, kind: String) {
+        Thread {
+            val f = File(sounds(), "$kind.snd")
+            var ok = false
+            try {
+                contentResolver.openInputStream(uri)?.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+                ok = f.length() > 0 && f.length() < 8_000_000L
+            } catch (e: Exception) { }
+            if (!ok) f.delete()
+            runOnUiThread {
+                if (kind == "scroll") loadScroll()
+                Toast.makeText(this, if (ok) "Sound saved" else "Couldn’t use that file (max 8 MB)", Toast.LENGTH_SHORT).show()
+                showSettings()
+            }
+        }.start()
+    }
+
+    // ---------- Menus ----------
     private fun showSettings() {
         val items = arrayOf(
             "Apps: " + if (all) "All apps" else "Games only",
+            "Layout: " + layoutNames[layout],
             "Style: " + styleNames[style],
             "Sound: " + if (sound) "On" else "Off",
+            "Scroll sound: " + if (File(sounds(), "scroll.snd").exists()) "Custom" else "Default",
+            "Launch sound: " + if (File(sounds(), "launch.snd").exists()) "Custom" else "Default",
             "Background: " + themes[theme].first
         )
         AlertDialog.Builder(this).setTitle("Settings").setItems(items) { _, w ->
+            var reopen = true
             when (w) {
                 0 -> { all = !all; refresh() }
-                1 -> { style = (style + 1) % 3; prefs.edit().putInt("style", style).apply(); flow.style = style }
-                2 -> { sound = !sound; prefs.edit().putBoolean("sound", sound).apply() }
-                3 -> { theme = (theme + 1) % themes.size; prefs.edit().putInt("theme", theme).apply(); applyTheme() }
+                1 -> {
+                    layout = (layout + 1) % 4; flow.mode = layout
+                    theme = layoutThemes[layout]; applyTheme()
+                    prefs.edit().putInt("layout", layout).putInt("theme", theme).apply()
+                }
+                2 -> { style = (style + 1) % 3; prefs.edit().putInt("style", style).apply(); flow.style = style }
+                3 -> { sound = !sound; prefs.edit().putBoolean("sound", sound).apply() }
+                4 -> { soundMenu("scroll"); reopen = false }
+                5 -> { soundMenu("launch"); reopen = false }
+                6 -> { theme = (theme + 1) % themes.size; prefs.edit().putInt("theme", theme).apply(); applyTheme() }
             }
-            showSettings()
+            if (reopen) showSettings()
         }.setNegativeButton("Close", null).show()
     }
 
@@ -97,8 +190,12 @@ class MainActivity : Activity() {
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         super.onActivityResult(req, res, data)
         val uri = data?.data
-        val pkg = pendingPkg
-        if (req != 7 || res != RESULT_OK || uri == null || pkg == null) return
+        if (res != RESULT_OK || uri == null) return
+        if (req == 7) pendingPkg?.let { saveCover(uri, it) }
+        if (req == 8) pendingSound?.let { saveSound(uri, it) }
+    }
+
+    private fun saveCover(uri: Uri, pkg: String) {
         Thread {
             try {
                 val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -118,11 +215,11 @@ class MainActivity : Activity() {
 
     private fun launch(item: Item) {
         val i = packageManager.getLaunchIntentForPackage(item.pkg) ?: return
-        if (sound) tone?.startTone(ToneGenerator.TONE_PROP_ACK, 120)
+        playLaunch()
         startActivity(i)
     }
 
-    // Controller buttons: D-pad, A launch, X game options, Start settings
+    // ---------- Controller ----------
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         if (e.action == KeyEvent.ACTION_DOWN) {
             when (e.keyCode) {
@@ -138,7 +235,6 @@ class MainActivity : Activity() {
         return super.dispatchKeyEvent(e)
     }
 
-    // Controller left stick
     override fun dispatchGenericMotionEvent(e: MotionEvent): Boolean {
         if ((e.source and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK && e.action == MotionEvent.ACTION_MOVE) {
             var x = e.getAxisValue(MotionEvent.AXIS_X)
@@ -153,6 +249,7 @@ class MainActivity : Activity() {
         return super.dispatchGenericMotionEvent(e)
     }
 
+    // ---------- Library ----------
     private fun set(key: String) = prefs.getStringSet(key, emptySet())!!.toSet()
     private fun put(key: String, v: Set<String>) = prefs.edit().putStringSet(key, HashSet(v)).apply()
 
