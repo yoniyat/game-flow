@@ -12,16 +12,20 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-class Item(val pkg: String, val label: String, val icon: Bitmap)
+class Item(val pkg: String, val label: String, val icon: Bitmap, val album: Bitmap)
 
 class CoverFlowView(ctx: Context) : View(ctx) {
     var items: List<Item> = emptyList()
         set(v) { field = v; pos = pos.coerceIn(0f, max(0, v.size - 1).toFloat()); invalidate() }
+    var album = false
+        set(v) { field = v; invalidate() }
     var emptyHint = ""
     var onLaunch: (Item) -> Unit = {}
     var onLong: (Item) -> Unit = {}
+    var onTick: () -> Unit = {}
 
     private var pos = 0f
+    private var lastIdx = -1
     private var anim: ValueAnimator? = null
     private var handled = false
     private val cam = Camera().apply { setLocation(0f, 0f, -20f) }
@@ -33,20 +37,28 @@ class CoverFlowView(ctx: Context) : View(ctx) {
 
     private fun s() = min(width * .55f, height * .42f)
 
+    private fun tickCheck() {
+        val i = pos.roundToInt()
+        if (i != lastIdx) { if (lastIdx != -1) onTick(); lastIdx = i }
+    }
+
     private fun snap(target: Float) {
         val t = target.roundToInt().coerceIn(0, max(0, items.size - 1)).toFloat()
         anim?.cancel()
         anim = ValueAnimator.ofFloat(pos, t).apply {
             duration = 320; interpolator = DecelerateInterpolator()
-            addUpdateListener { pos = it.animatedValue as Float; invalidate() }
+            addUpdateListener { pos = it.animatedValue as Float; tickCheck(); invalidate() }
             start()
         }
     }
 
+    fun move(d: Int) { snap(pos.roundToInt() + d.toFloat()) }
+    fun launchCurrent() { items.getOrNull(pos.roundToInt())?.let(onLaunch) }
+
     private val gd = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean { anim?.cancel(); handled = false; return true }
         override fun onScroll(a: MotionEvent?, b: MotionEvent, dx: Float, dy: Float): Boolean {
-            pos = (pos + dx / (s() * .3f)).coerceIn(0f, max(0, items.size - 1).toFloat()); invalidate(); return true
+            pos = (pos + dx / (s() * .3f)).coerceIn(0f, max(0, items.size - 1).toFloat()); tickCheck(); invalidate(); return true
         }
         override fun onFling(a: MotionEvent?, b: MotionEvent, vx: Float, vy: Float): Boolean {
             handled = true; snap(pos - vx / (s() * .3f) * .15f); return true
@@ -54,7 +66,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         override fun onSingleTapUp(e: MotionEvent): Boolean {
             handled = true
             val cx = width / 2f
-            if (abs(e.x - cx) < s() / 2) items.getOrNull(pos.roundToInt())?.let(onLaunch)
+            if (abs(e.x - cx) < s() / 2) launchCurrent()
             else snap(pos + if (e.x < cx) -1 else 1)
             return true
         }
@@ -82,14 +94,15 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         for (i in items.indices.sortedByDescending { abs(it - pos) }) {
             val d = i - pos
             if (abs(d) > 5) continue
+            val bmp = if (album) items[i].album else items[i].icon
             val t = d.coerceIn(-1f, 1f)
             val x = w / 2 + t * s * .62f + (d - t) * s * .28f
             cam.save(); cam.translate(0f, 0f, abs(t) * s * .35f); cam.rotateY(-t * 62f); cam.getMatrix(m); cam.restore()
             m.preTranslate(-s / 2, -s / 2); m.postTranslate(x, cy)
             c.save(); c.concat(m)
-            c.drawBitmap(items[i].icon, null, rect, p)
+            c.drawBitmap(bmp, null, rect, p)
             val layer = c.saveLayer(0f, s, s, s * 1.6f, null)
-            c.save(); c.translate(0f, 2 * s); c.scale(1f, -1f); c.drawBitmap(items[i].icon, null, rect, p); c.restore()
+            c.save(); c.translate(0f, 2 * s); c.scale(1f, -1f); c.drawBitmap(bmp, null, rect, p); c.restore()
             c.drawRect(0f, s, s, s * 1.6f, mask)
             c.restoreToCount(layer)
             c.restore()
@@ -97,6 +110,6 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         val cur = items[pos.roundToInt().coerceIn(0, items.size - 1)]
         txt.textSize = 58f; c.drawText(cur.label, w / 2, h * .86f, txt)
         txt.textSize = 36f; txt.alpha = 140
-        c.drawText("Tap to launch · long-press to edit library", w / 2, h * .86f + 60f, txt); txt.alpha = 255
+        c.drawText("Tap or press A to launch · long-press to edit library", w / 2, h * .86f + 60f, txt); txt.alpha = 255
     }
 }
