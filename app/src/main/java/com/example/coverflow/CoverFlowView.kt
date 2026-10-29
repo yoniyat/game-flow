@@ -41,6 +41,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
     var onLong: (Item) -> Unit = {}
     var onTick: () -> Unit = {}
     var onSelect: (Item?) -> Unit = {}
+    val hud = Hud(this)
 
     private var pos = 0f
     private var lastIdx = -1
@@ -272,6 +273,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         }
         if (fx) drawFx(c, w, h)
         c.drawText("flow", 48f, 100f, mark)
+        hud.draw(c, w, h)
         if (items.isEmpty()) {
             txt.textSize = 44f; txt.alpha = 160
             emptyHint.split("\n").forEachIndexed { i, l -> c.drawText(l, w / 2, h / 2 + i * 60f, txt) }
@@ -283,7 +285,7 @@ class CoverFlowView(ctx: Context) : View(ctx) {
         val cur = items[pos.roundToInt().coerceIn(0, items.size - 1)]
         txt.textSize = 58f; c.drawText(cur.label, w / 2, h * .86f, txt)
         txt.textSize = 34f; txt.alpha = 140
-        c.drawText("A / tap: launch · X / long-press: game options · Start / ⚙: settings", w / 2, h * .86f + 60f, txt)
+        c.drawText("A / tap: launch · X / long-press: game options · Start: settings", w / 2, h * .86f + 60f, txt)
         txt.alpha = 255
         if (fx) postInvalidateOnAnimation()
     }
