@@ -1,9 +1,17 @@
 package com.example.coverflow
 
+import android.Manifest
 import android.app.Activity
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.os.BatteryManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -12,6 +20,9 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.widget.FrameLayout
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 
 @Suppress("DEPRECATION")
@@ -36,6 +47,7 @@ class MainActivity : Activity() {
     var pendingBg = 0
     private var pendingFocus: String? = null
     private var firstLoad = true
+    private var rxOn = false
     val prefs by lazy { getSharedPreferences("library", MODE_PRIVATE) }
     val sortNames = listOf("A–Z", "Recently played", "My order")
     val styleNames = listOf("Normal icons", "Album covers", "Game covers")
@@ -51,6 +63,17 @@ class MainActivity : Activity() {
     private val settingsItem by lazy {
         val a = makeSettingsArt()
         Item(SETTINGS_PKG, "Settings", a.first, a.second, null)
+    }
+
+    // Battery, clock and Bluetooth events
+    private val rx = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, i: Intent) {
+            when (i.action) {
+                Intent.ACTION_BATTERY_CHANGED -> readBattery(i)
+                BluetoothDevice.ACTION_ACL_CONNECTED -> btConnected(i)
+                else -> updateClock()
+            }
+        }
     }
 
     override fun onCreate(b: Bundle?) {
@@ -80,13 +103,17 @@ class MainActivity : Activity() {
         flow.onLong = { item -> gameMenu(item) }
         flow.onTick = { audio.tick() }
         flow.onSelect = { item -> onSelect(item) }
+        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 3)
+        }
     }
 
-    override fun onResume() { super.onResume(); refresh(); audio.startMusic() }
+    override fun onResume() { super.onResume(); refresh(); audio.startMusic(); startRx() }
 
     override fun onPause() {
+        stopRx()
         cancelDwell(); selPkg = null
-        audio.stopGame(false); flow.showHover(null)
+        audio.stopGame(false); flow.hud.let { }; flow.showHover(null)
         audio.stopMusic()
         super.onPause()
     }
@@ -94,6 +121,45 @@ class MainActivity : Activity() {
     override fun onDestroy() { cancelDwell(); audio.release(); super.onDestroy() }
 
     override fun onBackPressed() { if (menu.isOpen) menu.back() else super.onBackPressed() }
+
+    // ---------- Top bar: battery, clock, Bluetooth ----------
+    private fun startRx() {
+        if (rxOn) return
+        val f = IntentFilter()
+        f.addAction(Intent.ACTION_BATTERY_CHANGED)
+        f.addAction(Intent.ACTION_TIME_TICK)
+        f.addAction(Intent.ACTION_TIME_CHANGED)
+        f.addAction(Intent.ACTION_TIMEZONE_CHANGED)
+        f.addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+        val sticky = if (Build.VERSION.SDK_INT >= 33) registerReceiver(rx, f, Context.RECEIVER_NOT_EXPORTED) else registerReceiver(rx, f)
+        rxOn = true
+        if (sticky != null && sticky.action == Intent.ACTION_BATTERY_CHANGED) readBattery(sticky)
+        updateClock()
+    }
+
+    private fun stopRx() { if (rxOn) { unregisterReceiver(rx); rxOn = false } }
+
+    private fun readBattery(i: Intent) {
+        val level = i.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = i.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
+        if (level >= 0 && scale > 0) flow.hud.battery = level * 100 / scale
+        val st = i.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+        flow.hud.charging = st == BatteryManager.BATTERY_STATUS_CHARGING || st == BatteryManager.BATTERY_STATUS_FULL
+        flow.invalidate()
+    }
+
+    private fun updateClock() {
+        val now = Date()
+        flow.hud.timeText = android.text.format.DateFormat.getTimeFormat(this).format(now)
+        flow.hud.dateText = SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(now)
+        flow.invalidate()
+    }
+
+    private fun btConnected(i: Intent) {
+        val d = i.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+        val name = try { d?.name } catch (e: SecurityException) { null }
+        flow.hud.toast(if (name.isNullOrBlank()) "Bluetooth device" else name)
+    }
 
     fun applyTheme() { flow.bgA = themes[themeIdx].second.toInt(); flow.bgB = themes[themeIdx].third.toInt() }
     fun covers() = File(filesDir, "covers").apply { mkdirs() }
